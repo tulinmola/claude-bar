@@ -1,0 +1,66 @@
+# Claude Bar
+
+A dead-simple macOS menu bar app showing Claude Code rate limits as two tiny
+horizontal bars under a small "Claude" label, battery-style: Session (5h) on
+top, Weekly (7d) below. Green under 70%, orange from 70%, red from 90%. Click
+for exact percentages, reset times, and a manual refresh.
+
+![Claude Bar in the macOS menu bar](docs/topbar.png)
+
+## How it works
+
+It reads your usage from the same first-party endpoint Claude Code itself uses
+— `GET https://api.anthropic.com/api/oauth/usage` — with the OAuth token from
+your login keychain. This is exactly what the `/usage` screen and the
+VSCode/Cursor Claude extension's own usage display call; the app just draws it
+as two bars. No transcript parsing, no estimates: these are the real numbers.
+
+Because the data lives only on Anthropic's servers (nothing local caches it),
+the app fetches it directly. It works no matter how you use Claude Code —
+terminal, VSCode, or Cursor.
+
+### First launch
+
+macOS will ask once for permission to read the `Claude Code-credentials`
+keychain item. Click **Always Allow** and it won't ask again. You must have
+logged into Claude Code at least once.
+
+## Good citizen
+
+Refreshing is deliberately lazy and power-friendly:
+
+- Polling uses `NSBackgroundActivityScheduler` (~5 min), the macOS-blessed API
+  for background work: the system coalesces it, defers it under battery / Low
+  Power Mode, and **never wakes a sleeping Mac**.
+- Immediate refresh only on launch, on wake-from-sleep, and when you open the
+  menu (throttled to one network call per ~45s).
+- No tight loops; idle CPU is effectively zero between polls. Zero
+  dependencies, ~350 lines of Swift.
+- Read-only: it only ever reads your usage, never makes inference calls.
+
+## Build & install
+
+```sh
+make run        # build dist/ClaudeBar.app and launch it
+make install    # copy the app to ~/Applications
+make preview    # render icon samples to /tmp/claudebar-preview.png
+```
+
+Use "Start at Login" in the app's menu to keep it around.
+
+## A note on the endpoint
+
+`api/oauth/usage` is first-party (it's what Claude Code's own `/usage` uses)
+but not part of the public API reference, so field names could change.
+Separately, Anthropic's Feb 2026 ToS update frames third-party use of the
+consumer OAuth token as non-compliant; enforcement targets *inference* through
+non-official clients, not read-only usage checks like this one. It's your own
+account, your own token, read-only — but worth knowing.
+
+## Development
+
+- `ClaudeBar --preview <out.png>` renders icon samples and exits.
+
+## License
+
+[MIT](LICENSE)
