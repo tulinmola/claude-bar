@@ -49,6 +49,22 @@ make preview    # render icon samples to /tmp/claudebar-preview.png
 
 Use "Start at Login" in the app's menu to keep it around.
 
+### Code signing (optional, recommended)
+
+By default the app is ad-hoc signed, so its code identity changes on every
+build — which means macOS re-prompts for keychain access (the Claude Code
+token) each time you rebuild. Sign with a **stable identity** and the "Always
+Allow" grant persists across rebuilds. Create an untracked `local.mk`:
+
+```makefile
+# 40-char hash from: security find-identity -p codesigning -v
+CODESIGN_IDENTITY = XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+```
+
+Any Apple Development cert works, or a self-signed "Code Signing" certificate
+made in Keychain Access. `local.mk` is gitignored, so your identity stays off
+the repo.
+
 ## A note on the endpoint
 
 `api/oauth/usage` is first-party (it's what Claude Code's own `/usage` uses)
