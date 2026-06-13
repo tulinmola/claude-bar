@@ -2,8 +2,8 @@
 
 A dead-simple macOS menu bar app showing Claude Code rate limits as two tiny
 horizontal bars under a small "Claude" label, battery-style: Session (5h) on
-top, Weekly (7d) below. Green under 70%, orange from 70%, red from 90%. Click
-for exact percentages, reset times, and a manual refresh.
+top, Weekly (7d) below. Green under 70%, orange from 70%, red from 90%. Click for the signed-in
+account, exact percentages, reset times, and a manual refresh.
 
 ![Claude Bar in the macOS menu bar](docs/topbar.png)
 

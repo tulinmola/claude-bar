@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var pollTimer: Timer?
     private var activityToken: NSObjectProtocol?
     private var usage: Usage?
+    private var accountEmail: String?
     private var lastError: UsageError?
     private var lastFetchStarted: Date?
     private var isFetching = false
@@ -30,6 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.menu = menu
         render()
 
+        accountEmail = UsageClient.accountEmail()
         refresh(force: true)
         NSWorkspace.shared.notificationCenter.addObserver(
             self, selector: #selector(didWake),
@@ -53,7 +55,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             reason: "Keep the Claude usage meter current")
     }
 
-    @objc private func didWake() { refresh(force: true) }
+    @objc private func didWake() {
+        accountEmail = UsageClient.accountEmail()
+        refresh(force: true)
+    }
 
     // MARK: - Fetch
 
@@ -102,6 +107,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
         let now = Date()
+
+        if let account = accountLine() {
+            menu.addItem(disabledItem(account))
+            menu.addItem(.separator())
+        }
+
         menu.addItem(infoItem(label: "Session (5h)", window: usage?.fiveHour, now: now))
         menu.addItem(infoItem(label: "Weekly (7d)", window: usage?.sevenDay, now: now))
         menu.addItem(disabledItem(statusText(now: now)))
@@ -123,6 +134,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(NSMenuItem(
             title: "Quit Claude Bar",
             action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+    }
+
+    /// "email · Max" for the signed-in account, or nil when unknown.
+    private func accountLine() -> String? {
+        guard let email = accountEmail else { return nil }
+        if let plan = usage?.plan, !plan.isEmpty {
+            return "\(email) · \(plan.capitalized)"
+        }
+        return email
     }
 
     private func statusText(now: Date) -> String {

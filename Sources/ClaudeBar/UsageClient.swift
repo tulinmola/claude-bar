@@ -16,6 +16,7 @@ struct UsageWindow {
 struct Usage {
     var fiveHour: UsageWindow?
     var sevenDay: UsageWindow?
+    var plan: String?      // subscription tier from the token, e.g. "max"
     var fetchedAt: Date
 }
 
@@ -35,11 +36,11 @@ enum UsageClient {
     static let clientVersion = "2.1.168"
 
     static func fetch() async -> Result<Usage, UsageError> {
-        guard let token = readToken() else { return .failure(.noToken) }
+        guard let creds = readCredentials() else { return .failure(.noToken) }
 
         var request = URLRequest(url: URL(string: "https://api.anthropic.com/api/oauth/usage")!)
         request.timeoutInterval = 10
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(creds.token)", forHTTPHeaderField: "Authorization")
         request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
         request.setValue("claude-code/\(clientVersion)", forHTTPHeaderField: "User-Agent")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -60,16 +61,17 @@ enum UsageClient {
         return .success(Usage(
             fiveHour: window(from: json["five_hour"]),
             sevenDay: window(from: json["seven_day"]),
+            plan: creds.plan,
             fetchedAt: Date()))
     }
 
     // MARK: - Keychain
 
-    /// The Claude Code login token, stored as a generic password under service
-    /// "Claude Code-credentials". Reading another app's item prompts for consent
-    /// on first launch ("Always Allow" makes it stick); falls back to
-    /// ~/.claude/.credentials.json if present (headless/Linux-style installs).
-    private static func readToken() -> String? {
+    /// The Claude Code login token (plus subscription tier), stored as a generic
+    /// password under service "Claude Code-credentials". Reading another app's
+    /// item prompts for consent on first launch ("Always Allow" makes it stick);
+    /// falls back to ~/.claude/.credentials.json (headless/Linux-style installs).
+    private static func readCredentials() -> (token: String, plan: String?)? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: "Claude Code-credentials",
@@ -78,23 +80,36 @@ enum UsageClient {
         ]
         var item: CFTypeRef?
         if SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-           let data = item as? Data, let token = accessToken(from: data) {
-            return token
+           let data = item as? Data, let creds = credentials(from: data) {
+            return creds
         }
         let fileURL = URL(fileURLWithPath:
             NSString(string: "~/.claude/.credentials.json").expandingTildeInPath)
-        if let data = try? Data(contentsOf: fileURL), let token = accessToken(from: data) {
-            return token
+        if let data = try? Data(contentsOf: fileURL), let creds = credentials(from: data) {
+            return creds
         }
         return nil
     }
 
-    private static func accessToken(from data: Data) -> String? {
+    private static func credentials(from data: Data) -> (token: String, plan: String?)? {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let oauth = json["claudeAiOauth"] as? [String: Any],
               let token = oauth["accessToken"] as? String, !token.isEmpty
         else { return nil }
-        return token
+        return (token, oauth["subscriptionType"] as? String)
+    }
+
+    /// Reads the signed-in account email from Claude Code's ~/.claude.json (a
+    /// plain file — no keychain access, no prompt).
+    static func accountEmail() -> String? {
+        let url = URL(fileURLWithPath:
+            NSString(string: "~/.claude.json").expandingTildeInPath)
+        guard let data = try? Data(contentsOf: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let account = json["oauthAccount"] as? [String: Any],
+              let email = account["emailAddress"] as? String, !email.isEmpty
+        else { return nil }
+        return email
     }
 
     // MARK: - Parsing
