@@ -1,21 +1,22 @@
 import AppKit
 import ServiceManagement
 
-/// Polls the usage endpoint on a deliberately lazy, power-friendly schedule:
-/// NSBackgroundActivityScheduler (system-coalesced, deferred on battery/Low
-/// Power Mode, never wakes a sleeping Mac), plus an immediate refresh on
-/// launch, on wake-from-sleep, and when the menu is opened. No tight loops,
-/// no waking the machine; idle CPU is effectively zero between polls.
+/// Polls the usage endpoint on a steady run-loop timer, plus an immediate
+/// refresh on launch, on wake-from-sleep, and when the menu is opened. The
+/// timer fires only while the Mac is awake (user-space timers never wake a
+/// sleeping Mac — they fire on the next wake), so it keeps the bars current
+/// without ever disturbing sleep. Idle CPU between polls is negligible.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
-    /// Background poll cadence. Rate limits move over 5h/7d windows, so this is
-    /// generous; the endpoint also throttles polling faster than ~3 min.
-    private let pollInterval: TimeInterval = 300
+    /// Poll cadence. Rate limits move over 5h/7d windows, so a few minutes is
+    /// plenty; the endpoint also throttles polling faster than ~3 min.
+    private let pollInterval: TimeInterval = 180
     /// Don't issue a network call more often than this, however many events fire.
     private let minFetchSpacing: TimeInterval = 45
 
     private var statusItem: NSStatusItem!
-    private var scheduler: NSBackgroundActivityScheduler?
+    private var pollTimer: Timer?
+    private var activityToken: NSObjectProtocol?
     private var usage: Usage?
     private var lastError: UsageError?
     private var lastFetchStarted: Date?
@@ -34,18 +35,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self, selector: #selector(didWake),
             name: NSWorkspace.didWakeNotification, object: nil)
 
-        let scheduler = NSBackgroundActivityScheduler(
-            identifier: "com.tulinmola.ClaudeBar.refresh")
-        scheduler.repeats = true
-        scheduler.interval = pollInterval
-        scheduler.tolerance = pollInterval / 2
-        scheduler.qualityOfService = .background
-        scheduler.schedule { [weak self] completion in
-            Task { @MainActor in
-                self?.refresh(force: true) { completion(.finished) }
-            }
+        // A plain run-loop timer fires reliably while the Mac is awake, unlike a
+        // discretionary background activity that the OS defers on battery. It is
+        // added to the main run loop, so the block runs on the main actor.
+        let timer = Timer(timeInterval: pollInterval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refresh(force: true) }
         }
-        self.scheduler = scheduler
+        timer.tolerance = pollInterval / 6
+        RunLoop.main.add(timer, forMode: .common)
+        pollTimer = timer
+
+        // Opt out of App Nap, which would otherwise throttle the timer on a
+        // background accessory app. This still allows the system to sleep
+        // normally — it only keeps us from being napped while awake.
+        activityToken = ProcessInfo.processInfo.beginActivity(
+            options: .userInitiatedAllowingIdleSystemSleep,
+            reason: "Keep the Claude usage meter current")
     }
 
     @objc private func didWake() { refresh(force: true) }
