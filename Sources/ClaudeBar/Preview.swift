@@ -3,8 +3,16 @@ import AppKit
 /// Development helper (`claude-bar --preview out.png`): renders the icon at
 /// several usage levels, scaled up, against light and dark menu bar colors.
 func renderPreview(to path: String) {
-    let samples: [(Double?, Double?)] = [
-        (12, 34), (45, 67), (68, 72), (85, 78), (95, 88), (100, 96), (0, 41), (nil, nil),
+    // (fiveHour, sevenDay, fiveHourElapsed, sevenDayElapsed)
+    // Ordered to double as the README legend. color = pace: green cushion,
+    // yellow approaching the line, red past it; length = spend; line = elapsed.
+    let samples: [(Double?, Double?, Double?, Double?)] = [
+        (10, 18, 55, 60),    // comfortable — well under pace (green / green)
+        (50, 48, 55, 55),    // approaching the line (yellow / yellow)
+        (78, 82, 55, 60),    // over pace — spending too fast (red / red)
+        (22, 85, 60, 72),    // mixed — session fine, weekly over (green / red)
+        (90, 93, 99, 99),    // nearly full but still on pace (yellow / yellow)
+        (nil, nil, nil, nil),// no data yet
     ]
     let scale: CGFloat = 6
     let cell = NSSize(width: IconRenderer.size.width * scale, height: IconRenderer.size.height * scale)
@@ -22,7 +30,9 @@ func renderPreview(to path: String) {
     NSRect(x: columnWidth, y: 0, width: columnWidth, height: canvas.height).fill()
 
     for (index, sample) in samples.enumerated() {
-        let icon = IconRenderer.icon(fiveHour: sample.0, sevenDay: sample.1)
+        let icon = IconRenderer.icon(
+            fiveHour: sample.0, sevenDay: sample.1,
+            fiveHourElapsed: sample.2, sevenDayElapsed: sample.3)
         let y = canvas.height - pad - cell.height - CGFloat(index) * (cell.height + pad)
         NSAppearance(named: .aqua)?.performAsCurrentDrawingAppearance {
             icon.draw(in: NSRect(x: pad, y: y, width: cell.width, height: cell.height))

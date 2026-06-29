@@ -91,11 +91,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let now = Date()
         let fiveHour = usage?.fiveHour?.effectivePercentage(at: now)
         let sevenDay = usage?.sevenDay?.effectivePercentage(at: now)
-        let rounded = [fiveHour.map { Int($0.rounded()) }, sevenDay.map { Int($0.rounded()) }]
+        let fiveHourElapsed = elapsedPercent(usage?.fiveHour, length: 5 * 3600, at: now)
+        let sevenDayElapsed = elapsedPercent(usage?.sevenDay, length: 7 * 24 * 3600, at: now)
+        let rounded = [
+            fiveHour.map { Int($0.rounded()) },
+            sevenDay.map { Int($0.rounded()) },
+            fiveHourElapsed.map { Int($0.rounded()) },
+            sevenDayElapsed.map { Int($0.rounded()) },
+        ]
         if rounded != lastDrawn {
             lastDrawn = rounded
-            statusItem.button?.image = IconRenderer.icon(fiveHour: fiveHour, sevenDay: sevenDay)
+            statusItem.button?.image = IconRenderer.icon(
+                fiveHour: fiveHour, sevenDay: sevenDay,
+                fiveHourElapsed: fiveHourElapsed, sevenDayElapsed: sevenDayElapsed)
         }
+    }
+
+    /// How far into a window we are, 0–100. nil when there's no data or the
+    /// window has already elapsed.
+    private func elapsedPercent(_ window: UsageWindow?, length: TimeInterval, at now: Date) -> Double? {
+        guard let reset = window?.resetsAt else { return nil }
+        let remaining = reset.timeIntervalSince(now)
+        guard remaining > 0, remaining <= length else { return nil }
+        return (1 - remaining / length) * 100
     }
 
     // MARK: - Menu
@@ -113,8 +131,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(.separator())
         }
 
-        menu.addItem(infoItem(label: "Session (5h)", window: usage?.fiveHour, now: now))
-        menu.addItem(infoItem(label: "Weekly (7d)", window: usage?.sevenDay, now: now))
+        menu.addItem(infoItem(
+            label: "Session (5h)", window: usage?.fiveHour, length: 5 * 3600, now: now))
+        menu.addItem(infoItem(
+            label: "Weekly (7d)", window: usage?.sevenDay, length: 7 * 24 * 3600, now: now))
         menu.addItem(disabledItem(statusText(now: now)))
 
         menu.addItem(.separator())
@@ -163,10 +183,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    private func infoItem(label: String, window: UsageWindow?, now: Date) -> NSMenuItem {
+    private func infoItem(
+        label: String, window: UsageWindow?, length: TimeInterval, now: Date
+    ) -> NSMenuItem {
         guard let window else { return disabledItem("\(label): no data") }
         let pct = window.effectivePercentage(at: now)
         var title = String(format: "%@: %.0f%%", label, pct)
+        if let elapsed = elapsedPercent(window, length: length, at: now) {
+            title += String(format: " · %.0f%% elapsed", elapsed)
+        }
         if let resetsAt = window.resetsAt, resetsAt > now {
             title += " · resets \(resetDescription(resetsAt, now: now))"
         }

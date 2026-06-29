@@ -1,11 +1,32 @@
 # Claude Bar
 
 A dead-simple macOS menu bar app showing Claude Code rate limits as two tiny
-horizontal bars under a small "Claude" label, battery-style: Session (5h) on
-top, Weekly (7d) below. Green under 70%, orange from 70%, red from 90%. Click for the signed-in
-account, exact percentages, reset times, and a manual refresh.
+horizontal bars under a small "Claude" label: Session (5h) on top, Weekly (7d)
+below. Each bar's length is how much you've spent, and a thin vertical line
+marks how far into that window you are (5h for Session, 7 days for Weekly).
+
+The color is your **pace**, not the raw level: **green** when your spend sits
+comfortably behind the line, **yellow** as it approaches, and **red** once it
+passes the line (you're spending faster than the window elapses).
+
+Click for the signed-in account, exact percentages, reset times, and a manual
+refresh.
 
 ![Claude Bar in the macOS menu bar](docs/topbar.png)
+
+## Reading the bars
+
+![Pace states on light and dark menu bars](docs/states.png)
+
+Top to bottom, each shown on a light and a dark menu bar:
+
+1. **Comfortable** — spend well behind the line, cushion to spare (green).
+2. **Approaching** — spend nearing the line; ease off soon (yellow).
+3. **Over pace** — spend past the line, burning faster than the window (red).
+4. **Mixed** — session fine while the weekly is already over (green + red).
+5. **Nearly full but on pace** — bars almost full yet still yellow: color tracks
+   pace, length tracks spend.
+6. **No data yet** — empty tracks until the first reading arrives.
 
 ## How it works
 
