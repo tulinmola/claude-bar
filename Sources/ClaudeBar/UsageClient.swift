@@ -16,6 +16,8 @@ struct UsageWindow {
 struct Usage {
     var fiveHour: UsageWindow?
     var sevenDay: UsageWindow?
+    var scopedWeekly: UsageWindow?   // per-model weekly sublimit, e.g. Fable
+    var scopedName: String?          // what it's scoped to, per the API
     var plan: String?      // subscription tier from the token, e.g. "max"
     var fetchedAt: Date
 }
@@ -58,9 +60,12 @@ enum UsageClient {
 
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return .failure(.transport) }
+        let scoped = scopedWeekly(from: json["limits"])
         return .success(Usage(
             fiveHour: window(from: json["five_hour"]),
             sevenDay: window(from: json["seven_day"]),
+            scopedWeekly: scoped?.window,
+            scopedName: scoped?.name,
             plan: creds.plan,
             fetchedAt: Date()))
     }
@@ -119,6 +124,38 @@ enum UsageClient {
               let utilization = dict["utilization"] as? Double
         else { return nil }
         return UsageWindow(utilization: utilization, resetsAt: date(from: dict["resets_at"]))
+    }
+
+    /// The per-model weekly sublimit (e.g. Fable), from the newer `limits`
+    /// array — the old top-level `seven_day_opus`/`_sonnet` keys are all null
+    /// now. Matched on `kind` rather than the model name, so a rename doesn't
+    /// silently blank the bar; the API's own `display_name` becomes the label.
+    /// Only the first scoped limit is used — accounts have one today.
+    private static func scopedWeekly(from value: Any?) -> (window: UsageWindow, name: String)? {
+        guard let limits = value as? [[String: Any]],
+              let limit = limits.first(where: { $0["kind"] as? String == "weekly_scoped" }),
+              let percent = number(from: limit["percent"])
+        else { return nil }
+        let window = UsageWindow(utilization: percent, resetsAt: date(from: limit["resets_at"]))
+        return (window, modelName(from: limit["scope"]) ?? "Scoped")
+    }
+
+    /// "Fable" from a model-scoped limit. Surface-scoped limits exist in the
+    /// schema but we've never seen one populated, so rather than guess at its
+    /// shape they fall back to the generic "Scoped" label.
+    private static func modelName(from value: Any?) -> String? {
+        guard let scope = value as? [String: Any],
+              let model = scope["model"] as? [String: Any],
+              let display = model["display_name"] as? String, !display.isEmpty
+        else { return nil }
+        return display
+    }
+
+    /// `percent` arrives as an integer where `utilization` is a real.
+    private static func number(from value: Any?) -> Double? {
+        if let double = value as? Double { return double }
+        if let int = value as? Int { return Double(int) }
+        return nil
     }
 
     /// `resets_at` is ISO 8601 with fractional seconds (e.g.

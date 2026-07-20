@@ -3,29 +3,39 @@ import AppKit
 enum IconRenderer {
     static let size = NSSize(width: 28, height: 18)
     private static let barHeight: CGFloat = 3.5
-    private static let weeklyY: CGFloat = 0
-    private static let sessionY: CGFloat = 5
+    private static let barGap: CGFloat = 1.5
 
     /// How many points of cushion before the time line at which the bar turns
     /// from green (comfortable) to yellow (approaching the line).
     private static let paceWarnMargin: Double = 10
 
-    /// A tiny "Claude" label over two battery-style horizontal bars — Session
-    /// (5h) on top, Weekly (7d) below. Bar length is how much you've spent; a
-    /// thin vertical line marks how far into the window we are; and the color is
-    /// the pace between them — green with a comfortable cushion, yellow nearing
-    /// the line, red once the fill passes it. Colors adapt to the menu bar
-    /// appearance; `nil` draws an empty track / no line.
-    static func icon(
-        fiveHour: Double?, sevenDay: Double?,
-        fiveHourElapsed: Double?, sevenDayElapsed: Double?
-    ) -> NSImage {
+    /// One meter: how much you've spent, against how far into the window you
+    /// are. A `nil` percentage draws an empty track; a `nil` elapsed draws no
+    /// time line.
+    struct Bar {
+        var percentage: Double?
+        var elapsed: Double?
+    }
+
+    /// Battery-style horizontal bars, top to bottom in the order given —
+    /// Session (5h), Weekly (7d), and the per-model weekly sublimit when the
+    /// account has one. Bar length is how much you've spent; a thin vertical
+    /// line marks how far into the window we are; and the color is the pace
+    /// between them — green with a comfortable cushion, yellow nearing the
+    /// line, red once the fill passes it. The stack is centered, so an account
+    /// without a sublimit gets two centered bars rather than a dead track.
+    /// Colors adapt to the menu bar appearance.
+    static func icon(bars: [Bar]) -> NSImage {
         let image = NSImage(size: size, flipped: false) { rect in
-            drawLabel(in: rect)
-            drawBar(percentage: fiveHour, elapsed: fiveHourElapsed, y: sessionY, in: rect)
-            drawBar(percentage: sevenDay, elapsed: sevenDayElapsed, y: weeklyY, in: rect)
-            drawTimeLine(percent: fiveHourElapsed, barY: sessionY, in: rect)
-            drawTimeLine(percent: sevenDayElapsed, barY: weeklyY, in: rect)
+            let ys = bars.indices.map { barY(index: $0, count: bars.count, in: rect) }
+            // All bars, then all lines: a time line overhangs its bar by 1pt,
+            // so drawing per-bar would let the next fill paint over it.
+            for (bar, y) in zip(bars, ys) {
+                drawBar(percentage: bar.percentage, elapsed: bar.elapsed, y: y, in: rect)
+            }
+            for (bar, y) in zip(bars, ys) {
+                drawTimeLine(percent: bar.elapsed, barY: y, in: rect)
+            }
             return true
         }
         image.isTemplate = false
@@ -44,15 +54,11 @@ enum IconRenderer {
         return .systemRed
     }
 
-    private static func drawLabel(in rect: NSRect) {
-        // Sized and kerned to sit just inside the bar width (~22pt vs 24pt track).
-        let label = NSAttributedString(string: "Claude", attributes: [
-            .font: NSFont.systemFont(ofSize: 6.5, weight: .semibold),
-            .kern: -0.3,
-            .foregroundColor: NSColor.labelColor.withAlphaComponent(0.85),
-        ])
-        let textSize = label.size()
-        label.draw(at: NSPoint(x: rect.midX - textSize.width / 2, y: rect.maxY - textSize.height))
+    /// Vertically centers the whole stack; index 0 is the topmost bar.
+    private static func barY(index: Int, count: Int, in rect: NSRect) -> CGFloat {
+        let stack = CGFloat(count) * barHeight + CGFloat(max(count - 1, 0)) * barGap
+        let top = rect.midY + stack / 2
+        return top - CGFloat(index + 1) * barHeight - CGFloat(index) * barGap
     }
 
     private static func drawBar(percentage: Double?, elapsed: Double?, y: CGFloat, in rect: NSRect) {

@@ -13,6 +13,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let pollInterval: TimeInterval = 180
     /// Don't issue a network call more often than this, however many events fire.
     private let minFetchSpacing: TimeInterval = 45
+    /// Lengths of the windows the endpoint reports. The per-model sublimit
+    /// shares the weekly window (and its reset time).
+    private let sessionLength: TimeInterval = 5 * 3600
+    private let weekLength: TimeInterval = 7 * 24 * 3600
 
     private var statusItem: NSStatusItem!
     private var pollTimer: Timer?
@@ -89,22 +93,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func render() {
         let now = Date()
-        let fiveHour = usage?.fiveHour?.effectivePercentage(at: now)
-        let sevenDay = usage?.sevenDay?.effectivePercentage(at: now)
-        let fiveHourElapsed = elapsedPercent(usage?.fiveHour, length: 5 * 3600, at: now)
-        let sevenDayElapsed = elapsedPercent(usage?.sevenDay, length: 7 * 24 * 3600, at: now)
-        let rounded = [
-            fiveHour.map { Int($0.rounded()) },
-            sevenDay.map { Int($0.rounded()) },
-            fiveHourElapsed.map { Int($0.rounded()) },
-            sevenDayElapsed.map { Int($0.rounded()) },
+        var bars = [
+            bar(usage?.fiveHour, length: sessionLength, at: now),
+            bar(usage?.sevenDay, length: weekLength, at: now),
         ]
+        // Only takes a third slot on accounts that actually have a per-model
+        // sublimit; otherwise the two bars re-center.
+        if let scoped = usage?.scopedWeekly {
+            bars.append(bar(scoped, length: weekLength, at: now))
+        }
+        // Redraw only when a rounded value changes. The count changes too if
+        // the sublimit appears or disappears, which counts as a change.
+        let rounded = bars.flatMap {
+            [$0.percentage.map { Int($0.rounded()) }, $0.elapsed.map { Int($0.rounded()) }]
+        }
         if rounded != lastDrawn {
             lastDrawn = rounded
-            statusItem.button?.image = IconRenderer.icon(
-                fiveHour: fiveHour, sevenDay: sevenDay,
-                fiveHourElapsed: fiveHourElapsed, sevenDayElapsed: sevenDayElapsed)
+            statusItem.button?.image = IconRenderer.icon(bars: bars)
         }
+    }
+
+    /// A window as the icon wants it: what you've spent, and how far into the
+    /// window we are.
+    private func bar(
+        _ window: UsageWindow?, length: TimeInterval, at now: Date
+    ) -> IconRenderer.Bar {
+        IconRenderer.Bar(
+            percentage: window?.effectivePercentage(at: now),
+            elapsed: elapsedPercent(window, length: length, at: now))
     }
 
     /// How far into a window we are, 0–100. nil when there's no data or the
@@ -132,9 +148,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         menu.addItem(infoItem(
-            label: "Session (5h)", window: usage?.fiveHour, length: 5 * 3600, now: now))
+            label: "Session (5h)", window: usage?.fiveHour, length: sessionLength, now: now))
         menu.addItem(infoItem(
-            label: "Weekly (7d)", window: usage?.sevenDay, length: 7 * 24 * 3600, now: now))
+            label: "Weekly (7d)", window: usage?.sevenDay, length: weekLength, now: now))
+        if let scoped = usage?.scopedWeekly {
+            menu.addItem(infoItem(
+                label: "\(usage?.scopedName ?? "Scoped") (7d)",
+                window: scoped, length: weekLength, now: now))
+        }
         menu.addItem(disabledItem(statusText(now: now)))
 
         menu.addItem(.separator())

@@ -3,16 +3,21 @@ import AppKit
 /// Development helper (`claude-bar --preview out.png`): renders the icon at
 /// several usage levels, scaled up, against light and dark menu bar colors.
 func renderPreview(to path: String) {
-    // (fiveHour, sevenDay, fiveHourElapsed, sevenDayElapsed)
-    // Ordered to double as the README legend. color = pace: green cushion,
-    // yellow approaching the line, red past it; length = spend; line = elapsed.
-    let samples: [(Double?, Double?, Double?, Double?)] = [
-        (10, 18, 55, 60),    // comfortable — well under pace (green / green)
-        (50, 48, 55, 55),    // approaching the line (yellow / yellow)
-        (78, 82, 55, 60),    // over pace — spending too fast (red / red)
-        (22, 85, 60, 72),    // mixed — session fine, weekly over (green / red)
-        (90, 93, 99, 99),    // nearly full but still on pace (yellow / yellow)
-        (nil, nil, nil, nil),// no data yet
+    // Session (5h), Weekly (7d), then the per-model sublimit — each as
+    // (spend, elapsed). Ordered to double as the README legend. color = pace:
+    // green cushion, yellow approaching the line, red past it; length = spend;
+    // line = elapsed.
+    func bar(_ spent: Double?, _ elapsed: Double?) -> IconRenderer.Bar {
+        IconRenderer.Bar(percentage: spent, elapsed: elapsed)
+    }
+    let samples: [[IconRenderer.Bar]] = [
+        [bar(10, 55), bar(18, 60), bar(24, 60)],        // comfortable — all under pace
+        [bar(50, 55), bar(48, 55), bar(52, 55)],        // approaching the line
+        [bar(78, 55), bar(82, 60), bar(88, 60)],        // over pace — spending too fast
+        [bar(22, 60), bar(40, 72), bar(85, 72)],        // mixed — the sublimit binds first
+        [bar(90, 99), bar(93, 99), bar(95, 99)],        // nearly full but still on pace
+        [bar(30, 60), bar(45, 70)],                     // no sublimit — two bars re-center
+        [bar(nil, nil), bar(nil, nil), bar(nil, nil)],  // no data yet
     ]
     let scale: CGFloat = 6
     let cell = NSSize(width: IconRenderer.size.width * scale, height: IconRenderer.size.height * scale)
@@ -30,9 +35,7 @@ func renderPreview(to path: String) {
     NSRect(x: columnWidth, y: 0, width: columnWidth, height: canvas.height).fill()
 
     for (index, sample) in samples.enumerated() {
-        let icon = IconRenderer.icon(
-            fiveHour: sample.0, sevenDay: sample.1,
-            fiveHourElapsed: sample.2, sevenDayElapsed: sample.3)
+        let icon = IconRenderer.icon(bars: sample)
         let y = canvas.height - pad - cell.height - CGFloat(index) * (cell.height + pad)
         NSAppearance(named: .aqua)?.performAsCurrentDrawingAppearance {
             icon.draw(in: NSRect(x: pad, y: y, width: cell.width, height: cell.height))

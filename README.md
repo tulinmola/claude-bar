@@ -1,9 +1,10 @@
 # Claude Bar
 
-A dead-simple macOS menu bar app showing Claude Code rate limits as two tiny
-horizontal bars under a small "Claude" label: Session (5h) on top, Weekly (7d)
-below. Each bar's length is how much you've spent, and a thin vertical line
-marks how far into that window you are (5h for Session, 7 days for Weekly).
+A dead-simple macOS menu bar app showing Claude Code rate limits as tiny
+horizontal bars: Session (5h) on top, Weekly (7d) below it, and — if your
+account has a per-model weekly sublimit, like Fable — that one at the bottom.
+Each bar's length is how much you've spent, and a thin vertical line marks how
+far into that window you are (5h for Session, 7 days for the other two).
 
 The color is your **pace**, not the raw level: **green** when your spend sits
 comfortably behind the line, **yellow** as it approaches, and **red** once it
@@ -23,10 +24,13 @@ Top to bottom, each shown on a light and a dark menu bar:
 1. **Comfortable** — spend well behind the line, cushion to spare (green).
 2. **Approaching** — spend nearing the line; ease off soon (yellow).
 3. **Over pace** — spend past the line, burning faster than the window (red).
-4. **Mixed** — session fine while the weekly is already over (green + red).
+4. **Mixed** — session and overall weekly fine while the per-model sublimit is
+   already over (green + green + red). This is the case the third bar exists
+   for: the sublimit is often what you actually hit first.
 5. **Nearly full but on pace** — bars almost full yet still yellow: color tracks
    pace, length tracks spend.
-6. **No data yet** — empty tracks until the first reading arrives.
+6. **No sublimit** — accounts without a per-model limit show two bars, centered.
+7. **No data yet** — empty tracks until the first reading arrives.
 
 ## How it works
 
@@ -34,7 +38,11 @@ It reads your usage from the same first-party endpoint Claude Code itself uses
 — `GET https://api.anthropic.com/api/oauth/usage` — with the OAuth token from
 your login keychain. This is exactly what the `/usage` screen and the
 VSCode/Cursor Claude extension's own usage display call; the app just draws it
-as two bars. No transcript parsing, no estimates: these are the real numbers.
+as bars. No transcript parsing, no estimates: these are the real numbers.
+
+The per-model sublimit comes from the response's `limits` array, matched on
+`kind: "weekly_scoped"` rather than on the model's name — so a rename won't
+silently blank the bar, and the menu label is whatever the API reports.
 
 Because the data lives only on Anthropic's servers (nothing local caches it),
 the app fetches it directly. It works no matter how you use Claude Code —
@@ -57,7 +65,7 @@ Refreshing is deliberately lazy and power-friendly:
 - Immediate refresh on launch, on wake-from-sleep, and when you open the menu
   (throttled to one network call per ~45s).
 - No tight loops; idle CPU is effectively zero between polls. Zero
-  dependencies, ~350 lines of Swift.
+  dependencies, ~450 lines of Swift.
 - Read-only: it only ever reads your usage, never makes inference calls.
 
 ## Build & install
