@@ -10,10 +10,13 @@ The color is your **pace**, not the raw level: **green** when your spend sits
 comfortably behind the line, **yellow** as it approaches, and **red** once it
 passes the line (you're spending faster than the window elapses).
 
-Click for the signed-in account, exact percentages, reset times, and a manual
-refresh.
+Click for the signed-in account and a full-size meter per limit — spend,
+how much of the window has elapsed, and the exact moment it resets ("resets
+sáb, 20:00" rather than a vague "in 5d") — plus a manual refresh.
 
 ![Claude Bar in the macOS menu bar](docs/topbar.png)
+
+![The menu: a meter per limit, with elapsed and the exact reset time](docs/menu.png)
 
 ## Reading the bars
 

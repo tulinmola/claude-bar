@@ -147,12 +147,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(.separator())
         }
 
-        menu.addItem(infoItem(
+        menu.addItem(usageItem(
             label: "Session (5h)", window: usage?.fiveHour, length: sessionLength, now: now))
-        menu.addItem(infoItem(
+        menu.addItem(usageItem(
             label: "Weekly (7d)", window: usage?.sevenDay, length: weekLength, now: now))
         if let scoped = usage?.scopedWeekly {
-            menu.addItem(infoItem(
+            menu.addItem(usageItem(
                 label: "\(usage?.scopedName ?? "Scoped") (7d)",
                 window: scoped, length: weekLength, now: now))
         }
@@ -204,29 +204,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    private func infoItem(
+    /// A drawn meter row. Falls back to plain text when there's nothing to
+    /// draw, so an unavailable window doesn't leave an empty chart.
+    private func usageItem(
         label: String, window: UsageWindow?, length: TimeInterval, now: Date
     ) -> NSMenuItem {
         guard let window else { return disabledItem("\(label): no data") }
-        let pct = window.effectivePercentage(at: now)
-        var title = String(format: "%@: %.0f%%", label, pct)
-        if let elapsed = elapsedPercent(window, length: length, at: now) {
-            title += String(format: " · %.0f%% elapsed", elapsed)
+        let elapsed = elapsedPercent(window, length: length, at: now)
+        let item = NSMenuItem()
+        item.view = UsageRowView(
+            title: label,
+            percentage: window.effectivePercentage(at: now),
+            elapsed: elapsed,
+            detail: detailText(window, elapsed: elapsed, now: now))
+        return item
+    }
+
+    /// "24% elapsed · resets sáb, 19:59" — the rest of what the old one-line
+    /// row carried, now that the percentage has a slot of its own.
+    private func detailText(_ window: UsageWindow, elapsed: Double?, now: Date) -> String {
+        var parts: [String] = []
+        if let elapsed {
+            parts.append(String(format: "%.0f%% elapsed", elapsed))
         }
         if let resetsAt = window.resetsAt, resetsAt > now {
-            title += " · resets \(resetDescription(resetsAt, now: now))"
+            parts.append("resets \(resetDescription(resetsAt, now: now))")
         }
-        return disabledItem(title)
+        return parts.joined(separator: " · ")
     }
 
     private func disabledItem(_ title: String) -> NSMenuItem {
         NSMenuItem(title: title, action: nil, keyEquivalent: "")
     }
 
+    /// The exact moment a window resets, rather than a vague "in 5d": today's
+    /// resets show just the clock, later ones prepend the weekday. Built from a
+    /// localized template, so the field order, separator, and 12- vs 24-hour
+    /// clock all follow the user's locale.
+    ///
+    /// Rounded to the minute first. The endpoint reports the boundary
+    /// end-exclusive and recomputes it per call, so it arrives a few hundred
+    /// milliseconds either side of the round minute (12:59:59.96Z one poll,
+    /// 13:00:00.02Z the next) — truncating would flip the displayed time
+    /// between 14:59 and 15:00 on every refresh. The round minute is the real
+    /// boundary anyway.
     private func resetDescription(_ date: Date, now: Date) -> String {
+        let rounded = Date(timeIntervalSinceReferenceDate:
+            (date.timeIntervalSinceReferenceDate / 60).rounded() * 60)
         let formatter = DateFormatter()
-        formatter.dateFormat = date.timeIntervalSince(now) < 23 * 3600 ? "HH:mm" : "EEE HH:mm"
-        return formatter.string(from: date)
+        formatter.setLocalizedDateFormatFromTemplate(
+            date.timeIntervalSince(now) < 23 * 3600 ? "jmm" : "EEEjmm")
+        return formatter.string(from: rounded)
     }
 
     @objc private func refreshNow() { refresh(force: true) }

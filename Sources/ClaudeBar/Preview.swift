@@ -19,9 +19,12 @@ func renderPreview(to path: String) {
         [bar(30, 60), bar(45, 70)],                     // no sublimit — two bars re-center
         [bar(nil, nil), bar(nil, nil), bar(nil, nil)],  // no data yet
     ]
-    let scale: CGFloat = 6
+    // Kept modest: the canvas is drawn into a Retina backing store, so the PNG
+    // comes out at twice these numbers. At 6x the result was 768px wide and
+    // swamped the README.
+    let scale: CGFloat = 3
     let cell = NSSize(width: IconRenderer.size.width * scale, height: IconRenderer.size.height * scale)
-    let pad: CGFloat = 12
+    let pad: CGFloat = 8
     let columnWidth = cell.width + pad * 2
     let canvas = NSSize(
         width: columnWidth * 2,
