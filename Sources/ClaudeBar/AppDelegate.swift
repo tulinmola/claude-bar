@@ -6,13 +6,22 @@ import ServiceManagement
 /// timer fires only while the Mac is awake (user-space timers never wake a
 /// sleeping Mac — they fire on the next wake), so it keeps the bars current
 /// without ever disturbing sleep. Idle CPU between polls is negligible.
+///
+/// Every one of those triggers funnels through `refresh()`, which is the only
+/// thing that talks to the network and the only place the spacing floor and the
+/// 429 backoff are enforced. There is deliberately no bypass: the endpoint
+/// throttles on the requests it receives, not on why we sent them.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
-    /// Poll cadence. Rate limits move over 5h/7d windows, so a few minutes is
-    /// plenty; the endpoint also throttles polling faster than ~3 min.
-    private let pollInterval: TimeInterval = 180
+    /// Poll cadence. Rate limits move over 5h/7d windows, so this is plenty —
+    /// and it leaves real margin under the ~3 min the endpoint starts throttling
+    /// at, rather than sitting exactly on the boundary the way 180s did.
+    private let pollInterval: TimeInterval = 300
     /// Don't issue a network call more often than this, however many events fire.
     private let minFetchSpacing: TimeInterval = 45
+    /// Ceiling on the 429 backoff, so a stuck or bogus `Retry-After` can't park
+    /// the bars indefinitely — we re-test at worst hourly.
+    private let maxBackoff: TimeInterval = 3600
     /// Lengths of the windows the endpoint reports. The per-model sublimit
     /// shares the weekly window (and its reset time).
     private let sessionLength: TimeInterval = 5 * 3600
@@ -24,7 +33,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var usage: Usage?
     private var accountEmail: String?
     private var lastError: UsageError?
-    private var lastFetchStarted: Date?
+    /// Earliest moment the next network call may go out — moved forward by the
+    /// spacing floor after every attempt, and much further out after a 429.
+    private var nextAllowedFetch = Date.distantPast
+    private var backoffStep = 0
     private var isFetching = false
     private var lastDrawn: [Int?]?
 
@@ -36,7 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         render()
 
         accountEmail = UsageClient.accountEmail()
-        refresh(force: true)
+        refresh()
         NSWorkspace.shared.notificationCenter.addObserver(
             self, selector: #selector(didWake),
             name: NSWorkspace.didWakeNotification, object: nil)
@@ -45,7 +57,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // discretionary background activity that the OS defers on battery. It is
         // added to the main run loop, so the block runs on the main actor.
         let timer = Timer(timeInterval: pollInterval, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.refresh(force: true) }
+            MainActor.assumeIsolated { self?.refresh() }
         }
         timer.tolerance = pollInterval / 6
         RunLoop.main.add(timer, forMode: .common)
@@ -61,32 +73,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func didWake() {
         accountEmail = UsageClient.accountEmail()
-        refresh(force: true)
+        refresh()
     }
 
     // MARK: - Fetch
 
-    private func refresh(force: Bool, completion: (() -> Void)? = nil) {
-        if isFetching { completion?(); return }
-        if !force, let last = lastFetchStarted, Date().timeIntervalSince(last) < minFetchSpacing {
-            completion?(); return
-        }
+    /// Fetches unless a call is already in flight, we're inside the spacing
+    /// floor, or we're serving out a 429 backoff.
+    private func refresh() {
+        guard !isFetching, Date() >= nextAllowedFetch else { return }
         isFetching = true
-        lastFetchStarted = Date()
+        nextAllowedFetch = Date().addingTimeInterval(minFetchSpacing)
         Task { [weak self] in
             let result = await UsageClient.fetch()
-            guard let self else { completion?(); return }
+            guard let self else { return }
             self.isFetching = false
             switch result {
             case .success(let usage):
                 self.usage = usage
                 self.lastError = nil
+                self.backoffStep = 0
             case .failure(let error):
                 self.lastError = error   // keep last-good usage on screen
+                if case .rateLimited(let retryAfter) = error {
+                    self.backOff(retryAfter: retryAfter)
+                }
             }
             self.render()
-            completion?()
         }
+    }
+
+    /// Wait longer after a 429: the endpoint's own `Retry-After` when it sends
+    /// one, otherwise doubling from a poll interval up to `maxBackoff`. Without
+    /// this the timer kept knocking at exactly the cadence that got us
+    /// throttled, which is what turned a brief 429 into a lasting one.
+    private func backOff(retryAfter: TimeInterval?) {
+        backoffStep = min(backoffStep + 1, 8)
+        let doubling = pollInterval * pow(2, Double(backoffStep - 1))
+        nextAllowedFetch = Date().addingTimeInterval(min(retryAfter ?? doubling, maxBackoff))
     }
 
     // MARK: - Rendering
@@ -135,7 +159,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: - Menu
 
     func menuWillOpen(_ menu: NSMenu) {
-        refresh(force: false)   // exact read when you look, throttled
+        refresh()   // exact read when you look, throttled
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
@@ -187,19 +211,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func statusText(now: Date) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
         switch lastError {
         case .noToken:
             return "Sign in with Claude Code to enable"
         case .unauthorized:
             return "Token expired — open Claude Code once"
         case .rateLimited:
-            return "Rate limited — retrying later"
+            // Name the moment, because while we're backing off "Refresh Now" is
+            // a no-op — saying "later" just invites clicking it.
+            return "Rate limited — retrying \(formatter.localizedString(for: nextAllowedFetch, relativeTo: now))"
         case .transport:
             return usage == nil ? "Can't reach Anthropic" : "Offline — showing last data"
         case nil:
             guard let fetchedAt = usage?.fetchedAt else { return "Loading…" }
-            let formatter = RelativeDateTimeFormatter()
-            formatter.unitsStyle = .short
             return "Updated \(formatter.localizedString(for: fetchedAt, relativeTo: now))"
         }
     }
@@ -257,7 +283,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return formatter.string(from: rounded)
     }
 
-    @objc private func refreshNow() { refresh(force: true) }
+    @objc private func refreshNow() { refresh() }
 
     @objc private func toggleLoginItem() {
         do {

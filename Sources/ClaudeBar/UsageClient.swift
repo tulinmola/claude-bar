@@ -25,7 +25,7 @@ struct Usage {
 enum UsageError: Error {
     case noToken          // not logged in, or this app lacks keychain access
     case unauthorized     // token expired/invalid
-    case rateLimited      // 429 — back off
+    case rateLimited(retryAfter: TimeInterval?)   // 429 — back off
     case transport        // network/parse failure
 }
 
@@ -35,7 +35,40 @@ enum UsageError: Error {
 /// the editor isn't already doing.
 enum UsageClient {
     /// Sent as `claude-code/<version>`; the endpoint throttles generic agents.
-    static let clientVersion = "2.1.168"
+    /// Resolved from the installed client rather than pinned, because a version
+    /// frozen at build time only drifts further from the real one the longer the
+    /// app runs. Cheap enough to redo per fetch: a couple of small file reads
+    /// every few minutes, next to an HTTPS round trip.
+    static var clientVersion: String { installedVersion() ?? fallbackVersion }
+
+    /// Used when no install can be located — a real version, so the header still
+    /// looks like the client rather than something the endpoint has never seen.
+    static let fallbackVersion = "2.1.235"
+
+    /// npm puts `package.json` next to the code; the local installer and the two
+    /// usual npm prefixes cover how Claude Code actually lands on a Mac. The
+    /// npm-global updater also records the version it last moved to, which is a
+    /// close-enough answer when none of the package paths exist.
+    private static func installedVersion() -> String? {
+        let packages = [
+            "~/.claude/local/node_modules/@anthropic-ai/claude-code/package.json",
+            "/opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/package.json",
+            "/usr/local/lib/node_modules/@anthropic-ai/claude-code/package.json",
+        ]
+        for path in packages {
+            if let version = string(atPath: path, key: "version") { return version }
+        }
+        return string(atPath: "~/.claude/.last-update-result.json", key: "version_to")
+    }
+
+    private static func string(atPath path: String, key: String) -> String? {
+        let url = URL(fileURLWithPath: NSString(string: path).expandingTildeInPath)
+        guard let data = try? Data(contentsOf: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let value = json[key] as? String, !value.isEmpty
+        else { return nil }
+        return value
+    }
 
     static func fetch() async -> Result<Usage, UsageError> {
         guard let creds = readCredentials() else { return .failure(.noToken) }
@@ -54,7 +87,7 @@ enum UsageClient {
         switch http.statusCode {
         case 200: break
         case 401, 403: return .failure(.unauthorized)
-        case 429: return .failure(.rateLimited)
+        case 429: return .failure(.rateLimited(retryAfter: retryAfter(from: http)))
         default: return .failure(.transport)
         }
 
@@ -68,6 +101,17 @@ enum UsageClient {
             scopedName: scoped?.name,
             plan: creds.plan,
             fetchedAt: Date()))
+    }
+
+    /// `Retry-After` in seconds. The spec allows an HTTP-date too, but the
+    /// endpoint sends the delta form; anything else falls through to the
+    /// caller's own backoff, which is the safer default anyway.
+    private static func retryAfter(from response: HTTPURLResponse) -> TimeInterval? {
+        guard let raw = response.value(forHTTPHeaderField: "Retry-After"),
+              let seconds = TimeInterval(raw.trimmingCharacters(in: .whitespaces)),
+              seconds > 0
+        else { return nil }
+        return seconds
     }
 
     // MARK: - Keychain

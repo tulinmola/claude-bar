@@ -61,14 +61,23 @@ logged into Claude Code at least once.
 
 Refreshing is deliberately lazy and power-friendly:
 
-- Polls every ~3 minutes while the Mac is awake, via a run-loop timer. It
+- Polls every ~5 minutes while the Mac is awake, via a run-loop timer. It
   **never wakes a sleeping Mac** (user-space timers fire on the next wake) and
   doesn't keep it awake either — it only opts out of App Nap so the timer isn't
   throttled in the background.
-- Immediate refresh on launch, on wake-from-sleep, and when you open the menu
-  (throttled to one network call per ~45s).
+- Immediate refresh on launch, on wake-from-sleep, when you open the menu, and
+  on "Refresh Now" — but every one of those goes through the same floor of one
+  network call per ~45s. No trigger can bypass it, so a burst of wakes or a
+  mashed refresh button can't outpace the endpoint.
+- Backs off on HTTP 429, honouring `Retry-After` when the endpoint sends one and
+  otherwise doubling from 5 minutes up to an hour. The menu names the moment it
+  will retry rather than a vague "later".
+- Sends the *installed* Claude Code version in its `User-Agent`, read from the
+  npm package on disk. A version pinned at build time only drifts further from
+  the real client the longer the app runs, and the endpoint throttles clients it
+  doesn't recognise.
 - No tight loops; idle CPU is effectively zero between polls. Zero
-  dependencies, ~450 lines of Swift.
+  dependencies, ~800 lines of Swift.
 - Read-only: it only ever reads your usage, never makes inference calls.
 
 ## Build & install
