@@ -95,8 +95,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.backoffStep = 0
             case .failure(let error):
                 self.lastError = error   // keep last-good usage on screen
-                if case .rateLimited(let retryAfter) = error {
+                switch error {
+                case .rateLimited(let retryAfter):
                     self.backOff(retryAfter: retryAfter)
+                case .noToken:
+                    // A dismissed or denied keychain prompt lands here. Backing
+                    // off means we ask again later instead of putting the same
+                    // dialog back up at the next poll, and the one after that.
+                    self.backOff(retryAfter: nil)
+                default:
+                    break
                 }
             }
             self.render()
@@ -215,7 +223,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         formatter.unitsStyle = .short
         switch lastError {
         case .noToken:
-            return "Sign in with Claude Code to enable"
+            // Covers both "never signed in" and "keychain access refused".
+            return "No token — sign in, or allow keychain access"
         case .unauthorized:
             return "Token expired — open Claude Code once"
         case .rateLimited:

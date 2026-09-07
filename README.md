@@ -53,9 +53,16 @@ terminal, VSCode, or Cursor.
 
 ### First launch
 
-macOS will ask once for permission to read the `Claude Code-credentials`
-keychain item. Click **Always Allow** and it won't ask again. You must have
-logged into Claude Code at least once.
+macOS will ask for permission to read the `Claude Code-credentials` keychain
+item. Click **Always Allow**. You must have logged into Claude Code at least
+once.
+
+The grant can lapse: the item belongs to Claude Code, which rewrites it as it
+refreshes your OAuth token, and the app has to re-read it whenever the token it
+holds stops working. So the prompt can come back occasionally — click **Always
+Allow** again. What it won't do is ask repeatedly: the token is held in memory
+between polls rather than re-read from the keychain each time, and a dismissed
+prompt backs off instead of reappearing at the next poll.
 
 ## Good citizen
 
@@ -76,8 +83,11 @@ Refreshing is deliberately lazy and power-friendly:
   npm package on disk. A version pinned at build time only drifts further from
   the real client the longer the app runs, and the endpoint throttles clients it
   doesn't recognise.
+- Reads the keychain only when the token it holds stops working — roughly once
+  a day, not on all ~280 polls. Every read is a chance for macOS to put a
+  consent prompt on screen, so the rarer they are, the better.
 - No tight loops; idle CPU is effectively zero between polls. Zero
-  dependencies, ~800 lines of Swift.
+  dependencies, ~830 lines of Swift.
 - Read-only: it only ever reads your usage, never makes inference calls.
 
 ## Build & install

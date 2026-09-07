@@ -70,9 +70,33 @@ enum UsageClient {
         return value
     }
 
-    static func fetch() async -> Result<Usage, UsageError> {
-        guard let creds = readCredentials() else { return .failure(.noToken) }
+    /// The credentials, once we've managed to read them. Reading the keychain is
+    /// what triggers macOS's consent prompt, and this app doesn't own the item —
+    /// Claude Code does, and rewrites it as it refreshes the token. So we hold
+    /// what we read and go back to the keychain only when the token stops
+    /// working, rather than on all ~280 polls a day.
+    @MainActor private static var cached: (token: String, plan: String?)?
 
+    @MainActor
+    static func fetch() async -> Result<Usage, UsageError> {
+        // A 401 means the token rotated under us: drop it and read the keychain
+        // once more — the single call in here that can put a prompt on screen.
+        if let creds = cached {
+            let result = await fetch(using: creds)
+            if case .failure(.unauthorized) = result {
+                cached = nil
+            } else {
+                return result
+            }
+        }
+        guard let creds = readCredentials() else { return .failure(.noToken) }
+        cached = creds
+        return await fetch(using: creds)
+    }
+
+    private static func fetch(
+        using creds: (token: String, plan: String?)
+    ) async -> Result<Usage, UsageError> {
         var request = URLRequest(url: URL(string: "https://api.anthropic.com/api/oauth/usage")!)
         request.timeoutInterval = 10
         request.setValue("Bearer \(creds.token)", forHTTPHeaderField: "Authorization")
